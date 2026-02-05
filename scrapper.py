@@ -96,6 +96,17 @@ def scrape_videos(url: str, delay_seconds: float) -> List[str]:
     return videos
 
 
+def scrape_texts(url: str, delay_seconds: float) -> List[str]:
+    html = fetch_html_js(url, delay_seconds)
+    soup = BeautifulSoup(html, "html.parser")
+    texts: List[str] = []
+    for desc in soup.select("div.article-description"):
+        text = desc.get_text(strip=True)
+        if text:
+            texts.append(text)
+    return texts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scrape .jpeg image links from JBZD.")
     parser.add_argument(
@@ -119,21 +130,26 @@ def main() -> int:
     try:
         images = scrape_images(args.url, args.delay)
         videos = scrape_videos(args.url, args.delay)
+        texts = scrape_texts(args.url, args.delay)
     except (HTTPError, URLError) as exc:
         print(f"Error fetching {args.url}: {exc}", file=sys.stderr)
         return 1
 
     payload = {
         "source_url": args.url,
-        "count": len(images) + len(videos),
+        "count": len(images) + len(videos) + len(texts),
         "images": images,
         "videos": videos,
+        "texts": texts,
     }
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    print(f"Saved {len(images + videos)} link(s) to {args.out}")
+    print(
+        f"Saved {len(images)} image link(s), {len(videos)} video link(s), "
+        f"and {len(texts)} text item(s) to {args.out}"
+    )
     return 0
 
 
