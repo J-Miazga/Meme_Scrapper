@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""
-Simple HTML scraper for jbzd.com.pl that collects image URLs from one page
-and writes them to a JSON file.
-
-Uses only the standard library (urllib + html.parser).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -13,7 +5,7 @@ import json
 from pydoc import html
 import sys
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright
@@ -76,35 +68,44 @@ def _unique_append(items: List[str], value: Optional[str]) -> None:
         items.append(value)
 
 
-def scrape_images(url: str, delay_seconds: float) -> List[str]:
-    html = fetch_html_js(url,delay_seconds)
-    soup = BeautifulSoup(html, "html.parser")
-    images: List[str] = []
-    for img in soup.select("img.article-image"):
-        _unique_append(images, _extract_src(img))
-    return images
+def scrape_memes(soup: BeautifulSoup) -> List[Dict[str, object]]:
+    memes: List[Dict[str, object]] = []
+    for article in soup.select("article.article"):
+        images: List[str] = []
+        videos: List[str] = []
+        texts: List[str] = []
 
+        for img in article.select("img.article-image"):
+            _unique_append(images, _extract_src(img))
 
-def scrape_videos(url: str, delay_seconds: float) -> List[str]:
-    html = fetch_html_js(url,delay_seconds)
-    soup = BeautifulSoup(html, "html.parser")
-    videos: List[str] = []
-    for source in soup.select(".video-player source"):
-        src = _extract_src(source)
-        _unique_append(videos, src)
-    
-    return videos
+        for source in article.select(".video-player source"):
+            _unique_append(videos, _extract_src(source))
 
+        for desc in article.select("div.article-description"):
+            text = desc.get_text(strip=True)
+            if text:
+                texts.append(text)
 
-def scrape_texts(url: str, delay_seconds: float) -> List[str]:
-    html = fetch_html_js(url, delay_seconds)
-    soup = BeautifulSoup(html, "html.parser")
-    texts: List[str] = []
-    for desc in soup.select("div.article-description"):
-        text = desc.get_text(strip=True)
-        if text:
-            texts.append(text)
-    return texts
+        types: List[str] = []
+        if texts:
+            types.append("text")
+        if images:
+            types.append("image")
+        if videos:
+            types.append("video")
+
+        meme_id = article.get("data-content-id") or article.get("id")
+        memes.append(
+            {
+                "id": meme_id,
+                "types": types,
+                "combination": "+".join(types) if types else "unknown",
+                "texts": texts,
+                "images": images,
+                "videos": videos,
+            }
+        )
+    return memes
 
 
 def main() -> int:
@@ -128,28 +129,29 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        images = scrape_images(args.url, args.delay)
-        videos = scrape_videos(args.url, args.delay)
-        texts = scrape_texts(args.url, args.delay)
+        html = fetch_html_js(args.url, args.delay)
+        soup = BeautifulSoup(html, "html.parser")
+        memes = scrape_memes(soup)
     except (HTTPError, URLError) as exc:
         print(f"Error fetching {args.url}: {exc}", file=sys.stderr)
         return 1
 
     payload = {
         "source_url": args.url,
-        "count": len(images) + len(videos) + len(texts),
-        "images": images,
-        "videos": videos,
-        "texts": texts,
+        "memes_on_page": len(memes),
+        "memes": memes,
     }
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    print(
-        f"Saved {len(images)} image link(s), {len(videos)} video link(s), "
-        f"and {len(texts)} text item(s) to {args.out}"
-    )
+    print(f"Found {len(memes)} meme(s) on page.")
+    for idx, meme in enumerate(memes, start=1):
+        print(
+            f"{idx}. meme id={meme.get('id')} combination={meme.get('combination')} "
+            f"types={meme.get('types')}"
+        )
+    print(f"Saved {len(memes)} meme(s) to {args.out}")
     return 0
 
 
