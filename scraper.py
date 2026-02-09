@@ -12,7 +12,6 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
     sync_playwright,
 )
-#from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from models import (
     DEFAULT_FETCH_RETRIES,
@@ -23,7 +22,6 @@ from models import (
 
 
 logger = logging.getLogger(__name__)
-
 
 def make_browser() -> tuple[Playwright, Browser, BrowserContext, Page]:
     playwright: Playwright | None = None
@@ -114,6 +112,12 @@ def _parse_paged_url(url: str) -> tuple[str, int, str]:
     return prefix, int(page_text), suffix
 
 
+def _normalize_id(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 
 def scrape_memes(soup: BeautifulSoup) -> List[Meme]:
     memes: List[Meme] = []
@@ -178,7 +182,7 @@ def scrape_until_known(
                 break
 
             for meme in page_memes:
-                meme_id = str(meme.id)
+                meme_id = _normalize_id(meme.id)
 
                 if meme_id and meme_id in known_ids:
                     stop_id = meme_id

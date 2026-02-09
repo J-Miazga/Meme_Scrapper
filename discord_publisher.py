@@ -12,10 +12,12 @@ from models import (
     REQUEST_TIMEOUT_SECONDS,
     SEND_DELAY_SECONDS,
     USER_AGENT,
+    MAX_RETRY_WAIT_SECONDS,
     Meme,
 )
 
 logger = logging.getLogger(__name__)
+
 
 
 def _build_message_content_and_embeds(meme: Meme) -> Tuple[List[str], List[dict]]:
@@ -76,34 +78,37 @@ def _safe_float(value: object) -> float | None:
     return None
 
 
-def _normalize_retry_delay(value: object) -> float | None:
+def _normalize_retry_delay(value: object, source: str) -> float | None:
     delay = _safe_float(value)
     if delay is None:
         return None
-    if delay >= 120:
-        delay = delay / 1000.0
+    if delay > (MAX_RETRY_WAIT_SECONDS * 2):
+        converted = delay / 1000.0
+        logger.debug("Interpreting retry delay as milliseconds from source=%s raw=%s interpreted=%.3fs", source, value, converted)
+        delay = converted
+    if delay > MAX_RETRY_WAIT_SECONDS:
+        logger.warning("Capping retry delay from source=%s raw=%s interpreted=%.3fs to %.3fs", source, value, delay, MAX_RETRY_WAIT_SECONDS)
+        delay = MAX_RETRY_WAIT_SECONDS
+    logger.debug("Using retry delay from source=%s raw=%s interpreted=%.3fs", source, value, delay)
     return delay
 
 
 def _retry_after_seconds(headers: dict, error_body: str) -> float:
-    reset_after = _normalize_retry_delay(headers.get("X-RateLimit-Reset-After"))
-    if reset_after is not None:
-        return reset_after
-
     if error_body:
         try:
             parsed = json.loads(error_body)
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):
-            body_delay = _normalize_retry_delay(parsed.get("retry_after"))
+            body_delay = _normalize_retry_delay(parsed.get("retry_after"), "body.retry_after")
             if body_delay is not None:
                 return body_delay
 
-    retry_after = _normalize_retry_delay(headers.get("Retry-After"))
-    if retry_after is not None:
-        return retry_after
+    reset_after = _normalize_retry_delay(headers.get("X-RateLimit-Reset-After"), "X-RateLimit-Reset-After")
+    if reset_after is not None:
+        return reset_after
 
+    logger.debug("Using default retry delay %.3fs", SEND_DELAY_SECONDS)
     return SEND_DELAY_SECONDS
 
 
@@ -161,23 +166,28 @@ def publish_memes(memes: Iterable[Meme], webhook_url: str) -> dict[str, int]:
     total_rate_limit_retries = 0
 
     for meme in reversed(memes_list):
-        lines, embeds = _build_message_content_and_embeds(meme)
-        content = "\n".join(lines).strip()
-        if not content:
-            skipped_empty += 1
-            continue
-        if len(content) > DISCORD_CONTENT_LIMIT:
-            skipped_too_long += 1
-            logger.warning("Skipping meme id=%s because content length %s exceeds Discord limit %s.", meme.id, len(content), DISCORD_CONTENT_LIMIT)
-            continue
-        sent, rate_limit_retries = _send_message_with_retry(webhook_url, content, embeds, meme)
-        total_rate_limit_retries += rate_limit_retries
-        if not sent:
+        try:
+            lines, embeds = _build_message_content_and_embeds(meme)
+            content = "\n".join(lines).strip()
+            if not content:
+                skipped_empty += 1
+                continue
+            if len(content) > DISCORD_CONTENT_LIMIT:
+                skipped_too_long += 1
+                logger.warning("Skipping meme id=%s because content length %s exceeds Discord limit %s.", meme.id, len(content), DISCORD_CONTENT_LIMIT)
+                continue
+            sent, rate_limit_retries = _send_message_with_retry(webhook_url, content, embeds, meme)
+            total_rate_limit_retries += rate_limit_retries
+            if not sent:
+                failed_send += 1
+                continue
+            sent_count += 1
+            logger.info("Successfully sent meme id=%s (%s/%s).", meme.id, sent_count, len(memes_list))
+            time.sleep(SEND_DELAY_SECONDS)
+        except Exception:
             failed_send += 1
+            logger.exception("Unexpected error while publishing meme id=%s.", meme.id)
             continue
-        sent_count += 1
-        logger.info("Successfully sent meme id=%s (%s/%s).", meme.id, sent_count, len(memes_list))
-        time.sleep(SEND_DELAY_SECONDS)
         
 
     summary = {
