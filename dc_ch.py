@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
 from typing import Iterable, List, Optional, Tuple
 from urllib.request import Request, urlopen
 
-import dotenv
-
+from dotenv import load_dotenv
+load_dotenv()
 
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) "
@@ -15,7 +17,9 @@ USER_AGENT = (
     "Chrome/120.0 Safari/537.36"
 )
 
-DISCORD_WEBHOOK_URL = dotenv.get_key(".env", "DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_CONTENT_LIMIT = 2000
+SEND_DELAY_SECONDS = 1.0
 
 
 def _build_message_content_and_embeds(meme: dict, include: List[str]) -> Tuple[List[str], List[dict]]:
@@ -145,16 +149,33 @@ def main() -> int:
         print("No memes matched the provided filters.", file=sys.stderr)
         return 1
 
+    sent_count = 0
+    skipped_empty = 0
+    skipped_too_long = 0
+
     for meme in memes:
         lines, embeds = _build_message_content_and_embeds(meme, include)
         content = "\n".join(lines).strip()
         if not content:
+            skipped_empty += 1
             continue
-        if len(content) > 2000:
-            content = content[:1990] + "\n[truncated]"
+        if len(content) > DISCORD_CONTENT_LIMIT:
+            skipped_too_long += 1
+            print(
+                f"Skipping meme id={meme.get('id')} because content length "
+                f"{len(content)} exceeds Discord limit {DISCORD_CONTENT_LIMIT}.",
+                file=sys.stderr,
+            )
+            continue
         _post_message(args.webhook, content, embeds)
+        sent_count += 1
+        time.sleep(SEND_DELAY_SECONDS)
 
-    print(f"Sent {len(memes)} meme message(s) to Discord.")
+    print(
+        f"Sent {sent_count} meme message(s) to Discord. "
+        f"Skipped empty: {skipped_empty}. "
+        f"Skipped too long: {skipped_too_long}."
+    )
     return 0
 
 
