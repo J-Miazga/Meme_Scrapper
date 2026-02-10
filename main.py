@@ -16,7 +16,7 @@ from state import export_checkpoint_output, known_ids_from_env
 
 
 def _configure_logging() -> logging.Logger:
-    level_name = os.getenv(LOG_LEVEL)
+    level_name = os.getenv(LOG_LEVEL, "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
         level=level,
