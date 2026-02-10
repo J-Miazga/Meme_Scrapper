@@ -1,9 +1,9 @@
 name: Daily Meme Scrape
 
 on:
-  # schedule:
-  #   - cron: "15 04 * * *"
-  workflow_dispatch:
+  schedule:
+    - cron: "15 04 * * *"
+  
 
 permissions:
   contents: read
