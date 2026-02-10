@@ -73,7 +73,6 @@ Workflow file: `.github/workflows/daily-meme-scrape.yml`
 
 Triggers:
 - daily schedule: `15 04 * * *` (04:15 UTC)
-- manual trigger: `workflow_dispatch`
 
 Workflow behavior:
 - validates required config before installing dependencies
@@ -86,6 +85,7 @@ Go to `Settings -> Secrets and variables -> Actions` and create:
 
 - Secret: `WEBSITE_URL`
 - Secret: `DISCORD_WEBHOOK_URL`
+- Secret: `VARIABLES_WRITE_TOKEN` (GitHub Personal Access Token with `repo` scope)
 - Variable: `KNOWN_MEME_IDS` (set `[]` initially)
 
 Go to `Settings -> Actions -> General -> Workflow permissions`:
