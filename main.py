@@ -1,5 +1,4 @@
 from __future__ import annotations
-import json
 import logging
 import os
 import sys
@@ -10,13 +9,14 @@ from models import (
     DEFAULT_MAX_PAGES,
     DEFAULT_SCRAPE_DELAY_SECONDS,
     DISCORD_WEBHOOK_URL_ENV_VAR,
-    LAST_SESSION_MEME_IDS,
     WEBSITE_URL_ENV_VAR,
+    LOG_LEVEL,
 )
+from state import export_checkpoint_output, known_ids_from_env
 
 
 def _configure_logging() -> logging.Logger:
-    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level_name = os.getenv(LOG_LEVEL)
     level = getattr(logging, level_name, logging.INFO)
     logging.basicConfig(
         level=level,
@@ -24,32 +24,6 @@ def _configure_logging() -> logging.Logger:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     return logging.getLogger("pipeline")
-
-
-def _normalize_id(value: object) -> str:
-    return str(value).strip()
-
-
-def _known_ids_from_env(logger: logging.Logger) -> set[str]:
-    raw = os.getenv("KNOWN_MEME_IDS")
-    if not raw:
-        fallback = {_normalize_id(item) for item in LAST_SESSION_MEME_IDS if _normalize_id(item)}
-        logger.info("KNOWN_MEME_IDS not set. Using fallback ids from code (%s ids).", len(fallback))
-        return fallback
-
-    parsed: list[str] = []
-    try:
-        decoded = json.loads(raw)
-        if isinstance(decoded, list):
-            parsed = [_normalize_id(item) for item in decoded if _normalize_id(item)]
-        else:
-            parsed = [_normalize_id(item) for item in raw.split(",") if _normalize_id(item)]
-    except json.JSONDecodeError:
-        parsed = [_normalize_id(item) for item in raw.split(",") if _normalize_id(item)]
-
-    known_ids = set(parsed)
-    logger.info("Loaded %s known id(s) from KNOWN_MEME_IDS.", len(known_ids))
-    return known_ids
 
 
 def main() -> int:
@@ -67,7 +41,12 @@ def main() -> int:
 
     delay_seconds = DEFAULT_SCRAPE_DELAY_SECONDS
     max_pages = DEFAULT_MAX_PAGES
-    known_ids = _known_ids_from_env(logger)
+    try:
+        known_ids = known_ids_from_env(logger)
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 1
+    known_ids_set = set(known_ids)
 
     logger.info("Pipeline started. url=%s max_pages=%s delay_seconds=%s",website_url,max_pages, delay_seconds)
 
@@ -75,12 +54,14 @@ def main() -> int:
         memes = scrape_until_known(
             base_url=website_url,
             delay_seconds=delay_seconds,
-            known_ids=known_ids,
+            known_ids=known_ids_set,
             max_pages=max_pages,
         )
     except Exception:
         logger.exception("Scraping step failed.")
         return 1
+
+    export_checkpoint_output(memes=memes, known_ids=known_ids, logger=logger)
 
     logger.info("Scraping step finished. New memes=%s", len(memes))
     if not memes:
@@ -88,7 +69,7 @@ def main() -> int:
         return 0
 
     try:
-        summary = publish_memes(memes=memes, webhook_url=webhook_url)
+        publish_memes(memes=memes, webhook_url=webhook_url)
     except Exception:
         logger.exception("Publishing step failed.")
         return 1
