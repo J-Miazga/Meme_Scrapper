@@ -23,10 +23,12 @@ jobs:
           WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           KNOWN_MEME_IDS: ${{ vars.KNOWN_MEME_IDS }}
+          VARIABLES_WRITE_TOKEN: ${{ secrets.VARIABLES_WRITE_TOKEN }}
         run: |
           test -n "$WEBSITE_URL" || { echo "Missing WEBSITE_URL (secret)."; exit 1; }
           test -n "$DISCORD_WEBHOOK_URL" || { echo "Missing DISCORD_WEBHOOK_URL (secret)."; exit 1; }
           test -n "$KNOWN_MEME_IDS" || { echo "Missing KNOWN_MEME_IDS (variable)."; exit 1; }
+          test -n "$VARIABLES_WRITE_TOKEN" || { echo "Missing VARIABLES_WRITE_TOKEN (secret)."; exit 1; }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -55,6 +57,7 @@ jobs:
         env:
           CHECKPOINT_MEME_IDS: ${{ steps.pipeline.outputs.checkpoint_meme_ids }}
         with:
+          github-token: ${{ secrets.VARIABLES_WRITE_TOKEN }}
           script: |
             const name = "KNOWN_MEME_IDS";
             const value = process.env.CHECKPOINT_MEME_IDS;
